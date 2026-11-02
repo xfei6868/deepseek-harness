@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { globSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import * as yaml from 'js-yaml'
+import { OPTIONAL_BUNDLES, PROFILE_TEMPLATES } from '@deepseek-ai/dsh-official-bundles'
 import { DESKTOP_HOST_RUNTIME_FILES, DESKTOP_PACKAGES_DIR } from '../src/core-package-set.ts'
 import {
   assertDesktopHostPackageFiles,
@@ -14,6 +16,37 @@ import {
 function packed(name: string, manifest: Record<string, unknown> = {}): PackedDesktopPackage {
   return { tarball: `${name}.tgz`, manifest: { name, version: '1.0.0', ...manifest } }
 }
+
+it('ships the same first-party capabilities and optional bundles on Intel and Apple Silicon', () => {
+  const root = resolve(import.meta.dirname, '../../..')
+  const workspace = yaml.load(readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8')) as { packages: string[] }
+  const available = new Map(globSync(workspace.packages.map(pattern => `${pattern}/package.json`), { cwd: root })
+    .map((file): [string, PackedDesktopPackage] => {
+      const manifest = JSON.parse(readFileSync(join(root, file), 'utf8')) as Record<string, unknown>
+      if (typeof manifest.name !== 'string') throw new Error(`Missing package name: ${file}`)
+      return [manifest.name, { tarball: file, manifest }]
+    }))
+  const capabilities = (arch: 'arm64' | 'x64'): string[] => {
+    const selected = selectDesktopPackageClosure(available, { platform: 'darwin', arch })
+    const names = selected.map(entry => String(entry.manifest.name))
+    expect(names).toEqual(expect.arrayContaining([...PROFILE_TEMPLATES.web!.bundles, ...OPTIONAL_BUNDLES]))
+    const native = `@deepseek-ai/node-addon-system-darwin-${arch}`
+    expect(names).toContain(native)
+    for (const { manifest } of selected) {
+      for (const [field, target] of [['os', 'darwin'], ['cpu', arch]] as const) {
+        const values = manifest[field]
+        if (values === undefined) continue
+        expect(Array.isArray(values), `${String(manifest.name)} ${field}`).toBe(true)
+        if (!Array.isArray(values)) throw new Error(`Invalid ${field}`)
+        expect(values, `${String(manifest.name)} ${field}`).not.toContain(`!${target}`)
+        expect(values.includes(target) || values.includes('any') || values.every(value => typeof value === 'string' && value.startsWith('!')),
+          `${String(manifest.name)} supports ${target}`).toBe(true)
+      }
+    }
+    return names.filter(name => name !== native)
+  }
+  expect(capabilities('x64')).toEqual(capabilities('arm64'))
+})
 
 describe('desktop package-set selection', () => {
   afterEach(() => {
@@ -137,7 +170,7 @@ it.each([{ os: 'darwin' }, { cpu: [42] }])('rejects malformed platform constrain
   expect(() => selectDesktopPackageClosure(packages, { platform: 'win32', arch: 'x64' })).toThrow(/has invalid/u)
 })
 
-it('copies no macOS tarball into the Windows package set', () => {
+it('requires the matching Computer Use executable for each macOS package set and omits the provider on Windows', () => {
   const root = mkdtempSync(join(tmpdir(), 'desktop-platform-packages-'))
   onTestFinished(() => { rmSync(root, { recursive: true, force: true }) })
   const inputs = join(root, 'inputs')
@@ -147,6 +180,10 @@ it('copies no macOS tarball into the Windows package set', () => {
     const folder = join(root, stem, 'package')
     mkdirSync(folder, { recursive: true })
     writeFileSync(join(folder, 'package.json'), JSON.stringify(entry.manifest))
+    if (name === '@deepseek-ai/dsh-experimental-cua-macos') {
+      mkdirSync(join(folder, 'native/bin/darwin-arm64'), { recursive: true })
+      writeFileSync(join(folder, 'native/bin/darwin-arm64/dsh-cua-native'), 'arm64 helper')
+    }
     if (name === '@deepseek-ai/dsh-desktop-host') {
       for (const file of DESKTOP_HOST_RUNTIME_FILES) {
         mkdirSync(join(folder, file, '..'), { recursive: true })
@@ -159,6 +196,15 @@ it('copies no macOS tarball into the Windows package set', () => {
   prepareDesktopPackageSet([inputs], output, { platform: 'win32', arch: 'x64' })
   expect(readdirSync(join(output, DESKTOP_PACKAGES_DIR))).not.toContain('dsh-experimental-cua-macos.tgz')
   prepareDesktopPackageSet([inputs], output, { platform: 'darwin', arch: 'arm64' })
+  expect(readFileSync(join(output, DESKTOP_PACKAGES_DIR, 'dsh-experimental-cua-macos.tgz')))
+    .toEqual(readFileSync(join(inputs, 'dsh-experimental-cua-macos.tgz')))
+  expect(() => { prepareDesktopPackageSet([inputs], output, { platform: 'darwin', arch: 'x64' }) })
+    .toThrow('Computer Use tarball omits package/native/bin/darwin-x64/dsh-cua-native')
+  const provider = join(root, 'dsh-experimental-cua-macos', 'package')
+  mkdirSync(join(provider, 'native/bin/darwin-x64'), { recursive: true })
+  writeFileSync(join(provider, 'native/bin/darwin-x64/dsh-cua-native'), 'x64 helper')
+  execFileSync('tar', ['-czf', join(inputs, 'dsh-experimental-cua-macos.tgz'), '-C', join(provider, '..'), 'package'])
+  prepareDesktopPackageSet([inputs], output, { platform: 'darwin', arch: 'x64' })
   expect(readFileSync(join(output, DESKTOP_PACKAGES_DIR, 'dsh-experimental-cua-macos.tgz')))
     .toEqual(readFileSync(join(inputs, 'dsh-experimental-cua-macos.tgz')))
 })

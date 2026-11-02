@@ -22,14 +22,19 @@ const workflow = yaml.load(readFileSync(resolve(import.meta.dirname, '../.github
   }>
 }
 
-it('confines signed Mac packaging to manual dispatch and a dedicated Apple Silicon runner', () => {
+it('confines signed Mac packaging to manual dispatch and a dedicated matching-architecture runner', () => {
   expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch'])
   expect(workflow.jobs.package).not.toHaveProperty('name')
   expect(workflow.on.workflow_dispatch).toMatchObject({ inputs: { test_release_id: { type: 'string', default: '', required: false } } })
   expect(workflow.on.workflow_dispatch).not.toHaveProperty('inputs.publish')
   expect(workflow.permissions).toEqual({ contents: 'read' })
   expect(workflow.concurrency).toEqual({ group: 'macos-desktop-package', 'cancel-in-progress': false })
-  expect(workflow.jobs.package!['runs-on']).toEqual(['self-hosted', 'macOS', 'ARM64', 'dsh-mac-package-trial'])
+  expect(workflow.on.workflow_dispatch).toMatchObject({ inputs: { architecture: {
+    type: 'choice', options: ['arm64', 'x64'], default: 'arm64', required: true,
+  } } })
+  expect(workflow.jobs.package!['runs-on']).toEqual([
+    'self-hosted', 'macOS', "${{ inputs.architecture == 'x64' && 'X64' || 'ARM64' }}", 'dsh-mac-package-trial',
+  ])
   const steps = workflow.jobs.package!.steps
   expect(steps.find(step => step.id === 'checkout')?.with).toMatchObject({ 'persist-credentials': false, clean: true })
   for (const step of steps) expect(step.run ?? '').not.toContain('${{ inputs.')
@@ -39,6 +44,19 @@ it('confines signed Mac packaging to manual dispatch and a dedicated Apple Silic
   expect(uploads[1]?.if).toBe('success()')
   expect(uploads[1]?.with?.path).toBe('${{ steps.retained.outputs.directory }}/*')
   expect(uploads[1]?.with?.['compression-level']).toBe(0)
+})
+
+it('uses the selected architecture for preparation, packaging, retention and artifact names', () => {
+  expect(workflow.jobs.package!.env).toMatchObject({
+    DSH_DESKTOP_TARGET_PLATFORM: 'darwin', DSH_DESKTOP_TARGET_ARCH: '${{ inputs.architecture }}',
+  })
+  const steps = workflow.jobs.package!.steps
+  for (const name of ['Check packaging configuration and toolchain', 'Build signed installers']) {
+    expect(steps.find(step => step.name === name)?.run).toContain('"package:desktop:mac:$DSH_DESKTOP_TARGET_ARCH"')
+  }
+  expect(steps.find(step => step.id === 'retained')?.run).toContain('retain-desktop-ci.ts')
+  expect(steps.find(step => step.name === 'Retain installers for the selected mode')?.with?.name)
+    .toContain('macos-${{ inputs.architecture }}-')
 })
 
 it('defaults to notarization and labels the explicit debugging option', () => {

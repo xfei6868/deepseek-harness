@@ -33,12 +33,14 @@ export interface NativeBuildSpec {
 
 /**
  * Locate the platform-specific executable owned by the CUA package.
+ * ASAR-contained packages require their helper in the adjacent `.asar.unpacked` directory.
  * @param packageRoot - Directory containing the CUA package manifest.
  * @param architecture - Architecture of the process that will execute the helper.
  * @returns Absolute executable path.
  */
 export function nativeExecutablePath(packageRoot: string, architecture: NativeArchitecture): string {
-  return join(packageRoot, 'native', 'bin', `darwin-${architecture}`, 'dsh-cua-native')
+  const physicalRoot = packageRoot.replace(/(^|[/\\])([^/\\]+\.asar)(?=[/\\]|$)/u, '$1$2.unpacked')
+  return join(physicalRoot, 'native', 'bin', `darwin-${architecture}`, 'dsh-cua-native')
 }
 
 /**

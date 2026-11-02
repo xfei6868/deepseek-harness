@@ -486,6 +486,9 @@ export async function packageTarget(
     catch (error) { preparationFailure ??= { error }; throw error }
   }
   const pack = async (): Promise<void> => {
+    if (target.platform === 'darwin') {
+      await executePreparation(['exec', 'tsx', 'apps/desktop/scripts/prepare-cua-native.ts'], targetEnv, REPOSITORY_ROOT)
+    }
     await executePreparation([
       ...(invocation.unsigned
         ? ['exec', 'tsx', 'apps/desktop/scripts/pack-local-packages.ts']

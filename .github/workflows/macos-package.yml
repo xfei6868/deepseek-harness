@@ -3,6 +3,12 @@ name: Package Desktop · macOS
 on:
   workflow_dispatch:
     inputs:
+      architecture:
+        description: '目标架构：arm64 用于 Apple Silicon，x64 用于 Intel Mac；在对应架构的专用 runner 上构建'
+        type: choice
+        options: [arm64, x64]
+        default: arm64
+        required: true
       preset:
         description: '打包环境：选择机器上的 test 或 production 配置；同时决定后续发布环境'
         type: choice
@@ -57,12 +63,14 @@ concurrency:
 
 jobs:
   package:
-    runs-on: [self-hosted, macOS, ARM64, dsh-mac-package-trial]
+    runs-on: [self-hosted, macOS, "${{ inputs.architecture == 'x64' && 'X64' || 'ARM64' }}", dsh-mac-package-trial]
     timeout-minutes: 180
     defaults:
       run:
         shell: bash
     env:
+      DSH_DESKTOP_TARGET_PLATFORM: darwin
+      DSH_DESKTOP_TARGET_ARCH: ${{ inputs.architecture }}
       PACKAGE_MACOS_ZIP_COMPRESSION_LEVEL: ${{ inputs.zip_compression_level }}
       PACKAGE_SKIP_NOTARIZATION: ${{ inputs.skip_notarization }}
       PACKAGE_SOURCE_REF: ${{ inputs.source_ref }}
@@ -121,14 +129,14 @@ jobs:
         run: |
           args=()
           if [[ "$PACKAGE_SKIP_NOTARIZATION" = true ]]; then args+=(--skip-notarization); fi
-          pnpm run package:desktop:mac:arm64 --check --build-version "$PACKAGE_VERSION" "${args[@]}"
+          pnpm run "package:desktop:mac:$DSH_DESKTOP_TARGET_ARCH" --check --build-version "$PACKAGE_VERSION" "${args[@]}"
       - name: Build signed installers
         env:
           PACKAGE_VERSION: ${{ steps.settings.outputs.version }}
         run: |
           args=()
           if [[ "$PACKAGE_SKIP_NOTARIZATION" = true ]]; then args+=(--skip-notarization); fi
-          pnpm run package:desktop:mac:arm64 --build-version "$PACKAGE_VERSION" "${args[@]}"
+          pnpm run "package:desktop:mac:$DSH_DESKTOP_TARGET_ARCH" --build-version "$PACKAGE_VERSION" "${args[@]}"
       - name: Retain complete package outside the checkout
         id: retained
         env:
@@ -148,7 +156,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: macos-arm64-${{ steps.settings.outputs.mode }}-${{ steps.settings.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: macos-${{ inputs.architecture }}-${{ steps.settings.outputs.mode }}-${{ steps.settings.outputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
           include-hidden-files: true
           path: ${{ steps.retained.outputs.directory }}/*
           compression-level: 0

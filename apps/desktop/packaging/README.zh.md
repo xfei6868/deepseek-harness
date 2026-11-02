@@ -99,6 +99,8 @@ pnpm run package:desktop:win:x64
 
 macOS arm64 命令要求 Apple Silicon。macOS x64 命令可以在 Intel macOS 或带 Rosetta 的 Apple Silicon 上运行。Windows x64 命令要求 Windows x64。Linux 不是受支持的 Desktop 发布目标。
 
+两种 macOS 架构携带相同的一方能力与可选 Bundle。系统原生 addon、Computer Use helper 和外部运行时二进制匹配所选 CPU；架构选择不会裁减功能。
+
 macOS 正式发布和本地未签名 DMG 都通过 [electron-builder 配置](../scripts/electron-builder-config.mjs)中的 `dmg.format: 'ULMO'` 使用 LZMA 压缩。[构建时补丁](../../../patches/app-builder-lib@26.17.0.patch)为固定版本 builder 的校验规则和 TypeScript 声明添加此格式。
 
 每个目标都在 `apps/desktop/.desktop-build/targets/<target>/` 下持有自己的打包输入、已准备运行时、包集合、dsh 依赖树、pnpm 准备状态、未打包应用、更新元数据和最终产物。Electron 归档缓存继续由 `.desktop-build/downloads` 共享，因为每个归档文件名都包含版本、平台和架构，并且在解包前经过验证。目标构建绝不读取其他目标的可变准备状态。
@@ -127,16 +129,16 @@ runner 的受监督启动和恢复见 [Windows runner 机器准备](../windows-s
 
 ## macOS 自托管打包
 
-`Package Desktop · macOS` [手动工作流](../../../.github/workflows/macos-package.yml) 使用带有 `dsh-mac-package-trial` 标签的 Apple Silicon runner。它选择 `test` 或 `production`，以 UTC 日期、运行编号和重试次数解析 `build_version=auto`，并复用现有签名、公证和打包运行时检查。安装包上传关闭重复 ZIP 压缩；诊断日志保留普通压缩。成功的 DMG／ZIP 与诊断日志保留 14 天；工作流不发布 release。操作人员须注册 runner，并验收完整 Actions 运行后再依赖该流程。 `zip_compression_level` 下拉选项默认为 `3`，也可选择 `7`；本次运行以该选项覆盖机器预设，只影响 ZIP 和自动升级下载，不影响 DMG。
+`Package Desktop · macOS` [手动工作流](../../../.github/workflows/macos-package.yml) 可选择 `architecture=arm64`（Apple Silicon，默认）或 `architecture=x64`（Intel Mac）。每个目标都需要具有匹配的 `ARM64` 或 `X64` 标签及 `dsh-mac-package-trial` 标签的原生 runner。它选择 `test` 或 `production`，以 UTC 日期、运行编号和重试次数解析 `build_version=auto`，并复用现有签名、公证和打包运行时检查。安装包上传关闭重复 ZIP 压缩；诊断日志保留普通压缩。成功的 DMG／ZIP 与诊断日志保留 14 天；工作流不发布 release。操作人员须注册 runner，并验收完整 Actions 运行后再依赖该流程。 `zip_compression_level` 下拉选项默认为 `3`，也可选择 `7`；本次运行以该选项覆盖机器预设，只影响 ZIP 和自动升级下载，不影响 DMG。
 
 运行 `node apps/desktop/scripts/setup-macos-packaging.mjs "$HOME/dsh-ci"` 创建私有 `runner/`、`packaging/{presets,secrets,certificates}` 和 `cache/macos-signatures` 目录，不覆盖已有文件；追加 `--check` 仅检查。在 checkout 外填写 [preset](../config/macos-packaging/test.env.example) 和[签名](../config/macos-packaging/macos-signing.env.example)模板，将秘密和证书文件权限设为 `0600`。`DSH_PACKAGING_CONFIG_DIR` 指定 `packaging` 的绝对目录，`DSH_PACKAGING_PRESET` 选择其中的 preset；缺少文件立即失败，不回退到 `.env.macos`。Mac 签名和仅准备构建读取 `secrets/macos-signing.env`，相对凭据路径以该文件所在目录为基准。公开 preset 拒绝签名凭据，签名文件不能覆盖公开配置。本地未签名 Mac 构建保留无需配置的行为。
 
-运行 `bash apps/desktop/scripts/start-macos-packaging-runner.sh "$HOME/dsh-ci/runner" "$HOME/dsh-ci/packaging" <absolute-node-24-bin-directory> --check` 检查宿主工具和配置文件。脚本同时选择当前 Xcode 及其 macOS SDK，并编译小型链接探针。注册后省略 `--check`，清理继承环境并在前台启动 runner，存活期间阻止空闲睡眠。安装下方服务前，先用 Ctrl-C 停止。runner 拥有 `_work` 下的源码目录，与日常开发分开。该账户可读取签名文件，因此只执行可信代码。沿用现有公证代理恢复规则；强制终止后，先检查保留的恢复记录再构建。新建模板将 `DSH_DESKTOP_MACOS_SIGNATURE_CACHE_DIR` 设为 checkout 外 `cache/macos-signatures` 的绝对路径。已有部署重新运行 setup 后，在各 preset 中补上该字段；已有文件保持不变。这样可跨干净检出保留签名；缓存验证和容量限制见 [macOS 签名](#macos-release-signing)。
+Intel 和 Apple Silicon 主机使用同一份 runner 启动脚本。运行 `bash apps/desktop/scripts/start-macos-packaging-runner.sh "$HOME/dsh-ci/runner" "$HOME/dsh-ci/packaging" <absolute-node-24-bin-directory> --check` 检查宿主工具和配置文件。脚本同时选择当前 Xcode 及其 macOS SDK，并编译小型链接探针。注册后省略 `--check`，清理继承环境并在前台启动 runner，存活期间阻止空闲睡眠。安装下方服务前，先用 Ctrl-C 停止。runner 拥有 `_work` 下的源码目录，与日常开发分开。该账户可读取签名文件，因此只执行可信代码。沿用现有公证代理恢复规则；强制终止后，先检查保留的恢复记录再构建。新建模板将 `DSH_DESKTOP_MACOS_SIGNATURE_CACHE_DIR` 设为 checkout 外 `cache/macos-signatures` 的绝对路径。已有部署重新运行 setup 后，在各 preset 中补上该字段；已有文件保持不变。这样可跨干净检出保留签名；缓存验证和容量限制见 [macOS 签名](#macos-release-signing)。
 
 
 无论是否公证，ZIP 都使用同一压缩配置；App 只组装一次，再分别生成 DMG 和 ZIP，确保 ZIP 设置不改变 DMG 压缩。工作流选项 `skip_notarization` 默认为 `false`；对应 CLI 参数是 `--skip-notarization`。该模式保留 Developer ID 签名、DMG 签名验证和打包运行时验证，跳过 Apple 公证和 stapling，不要求 Apple 公证凭据。DMG／ZIP 文件名带 `-unnotarized`，存放于 `.desktop-build/targets/<target>/unnotarized-artifacts/`，上传产物标为 `unnotarized-debug`。这些产物仅供内部调试：Gatekeeper 可能阻止下载副本运行，不能视为可分发包或用于更新发布。该模式不写入发布完成记录，不能与未签名、Windows 或仅准备构建组合。
 
-在 checkout 中，以注册 runner 的同一账户安装用户服务，不使用 `sudo`：
+在 checkout 中，以注册 runner 的同一账户安装用户服务，不使用 `sudo`。将下方 Node 路径替换为自己的 Node 24 可执行文件目录（Intel Homebrew 安装通常为 `/usr/local/opt/node@24/bin`）：
 
 ```sh
 bash apps/desktop/scripts/macos-runner-service.sh install "$HOME/dsh-ci/runner" "$HOME/dsh-ci/packaging" /opt/homebrew/opt/node@24/bin
@@ -281,7 +283,7 @@ Desktop [补丁策略](../scripts/runtime-patch-policy.ts) 将每份工作区补
 
 Desktop 依赖 overrides 在补丁策略模块中单独声明，不从补丁版本推导。pi-ai 约束使运行时版本保持在共享补丁已验证的版本。Desktop 仍会在每次构建时重新解析运行时锁文件，再通过 `--frozen-lockfile` 安装；不同构建之间的依赖解析尚不保证可复现。CLI 打包安装测试及其他交付流程保留各自的配置。
 
-每条打包命令都会构建仓库，打包以 dsh 和私有 Desktop Host 为根的第一方生产依赖闭包，并准备目标专用的 Electron 分发包和包含共享 pnpm CLI 的 primary-runtime。`prepare:dsh` 在构建时安装一次生产依赖图，准备物化包供 electron-builder 归档到 `app.asar/dsh`，移除包管理器元数据，并生成包含共享包版本和最终文件哈希的 `desktop-runtime.json`。macOS 签名构建先签名并验证原生文件，再生成清单；electron-builder 不对已签名的此目录重复进行嵌套签名。资源映射明确包含默认根目录过滤器会忽略的 `dsh/node_modules`；准备完成的运行时清单在原生签名后检查。原生可执行文件及库解包到 ASAR 旁；Python、独立 Node 和 pnpm 保留在外部 runtime 资源中。Windows 打包逐项检查准备好的 PE，确认其 ASAR 条目已标记为解包，且磁盘副本字节一致；未签名构建也执行此检查。Builder glob 规则用单字符通配符匹配 PE 文件名中的花括号，因此同目录中名称匹配的文件也可能被解包。准备好的运行时 smoke 沿用已验证的目标描述符，不使用构建宿主的架构。签名安装包、公证、已安装应用升级和各目标原生模块的验收需要发布环境。
+每条打包命令都会构建仓库，打包以 dsh 和私有 Desktop Host 为根的第一方生产依赖闭包，并准备目标专用的 Electron 分发包和包含共享 pnpm CLI 的 primary-runtime。macOS 打包前会使用 Swift 6 按目标架构编译 Computer Use helper，通过 lipo 验证架构，并将可执行文件放入 provider 的 tarball；准备包集合时会拒绝缺少目标 helper 的产物。`prepare:dsh` 在构建时安装一次生产依赖图，准备物化包供 electron-builder 归档到 `app.asar/dsh`，移除包管理器元数据，并生成包含共享包版本和最终文件哈希的 `desktop-runtime.json`。macOS 签名构建先签名并验证原生文件，再生成清单；electron-builder 不对已签名的此目录重复进行嵌套签名。资源映射明确包含默认根目录过滤器会忽略的 `dsh/node_modules`；准备完成的运行时清单在原生签名后检查。原生可执行文件及库解包到 ASAR 旁；Python、独立 Node 和 pnpm 保留在外部 runtime 资源中。Windows 打包逐项检查准备好的 PE，确认其 ASAR 条目已标记为解包，且磁盘副本字节一致；未签名构建也执行此检查。Builder glob 规则用单字符通配符匹配 PE 文件名中的花括号，因此同目录中名称匹配的文件也可能被解包。准备好的运行时 smoke 沿用已验证的目标描述符，不使用构建宿主的架构。签名安装包、公证、已安装应用升级和各目标原生模块的验收需要发布环境。
 
 Windows 运行时在原生签名前后封存文件清单，每次最多并发读取八个文件。读取失败时会等待未完成的读取结束，不替换描述符；封存成功后仍须完成后续的完整性与 smoke 检查。
 

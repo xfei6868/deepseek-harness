@@ -155,6 +155,13 @@ export function prepareDesktopPackageSet(
   const host = selected.find(packed => packed.manifest.name === DESKTOP_HOST_PACKAGE)
   if (host === undefined) throw new Error(`desktop package set: selected closure omits ${DESKTOP_HOST_PACKAGE}`)
   assertDesktopHostPackageFiles(tarballFiles(host.tarball))
+  const cua = selected.find(packed => packed.manifest.name === '@deepseek-ai/dsh-experimental-cua-macos')
+  if (target.platform === 'darwin' && cua !== undefined) {
+    const helper = `package/native/bin/darwin-${target.arch}/dsh-cua-native`
+    if (!tarballFiles(cua.tarball).includes(helper)) {
+      throw new Error(`desktop package set: Computer Use tarball omits ${helper}; prepare the target native helper before packing`)
+    }
+  }
   rmSync(output, { recursive: true, force: true })
   const packageDir = join(output, DESKTOP_PACKAGES_DIR)
   mkdirSync(packageDir, { recursive: true })

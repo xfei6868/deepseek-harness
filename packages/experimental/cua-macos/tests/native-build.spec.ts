@@ -93,6 +93,31 @@ it('uses an installed executable without starting a compiler', async () => {
   expect(f.spawn).not.toHaveBeenCalled()
 })
 
+it.each(['arm64', 'x64'] as const)('uses the unpacked %s helper for an ASAR-contained package without compiling', async (architecture) => {
+  const f = await fixture()
+  const packageRoot = join(f.root, 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-experimental-cua-macos')
+  const expected = join(f.root, 'app.asar.unpacked', 'dsh', 'node_modules', '@deepseek-ai',
+    'dsh-experimental-cua-macos', 'native', 'bin', `darwin-${architecture}`, 'dsh-cua-native')
+  await mkdir(join(expected, '..'), { recursive: true })
+  await writeFile(expected, f.output, { mode: 0o755 })
+  expect(await prepareNativeExecutable({ ...f.spec, packageRoot, architecture })).toBe(expected)
+  expect(nativeExecutablePath(packageRoot, architecture)).toBe(expected)
+  expect(f.spawn).not.toHaveBeenCalled()
+  const physicalRoot = packageRoot.replace('app.asar', 'app.asar.unpacked')
+  expect(nativeExecutablePath(physicalRoot, architecture)).toBe(expected)
+})
+
+it('rejects a missing unpacked helper even when an archive-contained copy exists', async () => {
+  const f = await fixture()
+  const packageRoot = join(f.root, 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-experimental-cua-macos')
+  const archived = join(packageRoot, 'native', 'bin', 'darwin-x64', 'dsh-cua-native')
+  await mkdir(join(archived, '..'), { recursive: true })
+  await writeFile(archived, f.output, { mode: 0o755 })
+  await expect(prepareNativeExecutable({ ...f.spec, packageRoot, architecture: 'x64' }))
+    .rejects.toMatchObject({ code: 'ENOENT' })
+  expect(f.spawn).not.toHaveBeenCalled()
+})
+
 it('keeps the previous executable when a build fails and reports compiler output', async () => {
   const f = await fixture()
   const path = await buildNativeExecutable(f.spec)

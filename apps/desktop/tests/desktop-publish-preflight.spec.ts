@@ -3,6 +3,7 @@ import { preflightDesktopPublish } from '../scripts/preflight-desktop-publish.mj
 
 it.each([
   ['macos-arm64-unnotarized-debug-1.0.0-42-2', '跳过了公证'],
+  ['macos-x64-unnotarized-debug-1.0.0-42-2', '跳过了公证'],
   ['windows-x64-unsigned-1.0.0-42-2', '未签名'],
 ])('rejects %s from paginated artifact metadata with rebuilding instructions', (name, reason) => {
   const paths: string[] = []

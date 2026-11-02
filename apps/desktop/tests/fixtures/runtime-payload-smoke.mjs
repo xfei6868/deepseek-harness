@@ -1,9 +1,9 @@
 /** Exercise filtered Desktop native and HTML dependencies under its Electron Node runtime. */
 
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { open, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join, resolve } from 'node:path'
@@ -92,6 +92,23 @@ async function checkSearch() {
   assert.equal(run(['--files', '--glob', name, '.']), `./${name}`)
 }
 
+/** Acquire and release the packaged POSIX lock used by atomic file operations. */
+async function checkFlock() {
+  if (process.platform === 'win32') return
+  const { tryLockExclusive } = await import(pathToFileURL(requireRuntime.resolve('@deepseek-ai/node-addon-system/flock')).href)
+  const file = join(scratch, 'flock')
+  const owner = await open(file, 'wx', 0o600)
+  try {
+    await tryLockExclusive(owner.fd)
+    const contender = await open(file, 'r+')
+    try {
+      await assert.rejects(tryLockExclusive(contender.fd), error => error.code === 'EAGAIN' || error.code === 'EWOULDBLOCK')
+    } finally { await contender.close() }
+  } finally { await owner.close() }
+  const successor = await open(file, 'r+')
+  try { await tryLockExclusive(successor.fd) } finally { await successor.close() }
+}
+
 /** Resolve one system function through Koffi's packaged native module. */
 function checkKoffi() {
   const koffi = requireRuntime('koffi')
@@ -104,6 +121,47 @@ function checkKoffi() {
   } finally {
     library.unload()
   }
+}
+
+/** Reject incomplete startup arguments before the native helper can create a server or request permissions. */
+function checkCua() {
+  if (process.platform !== 'darwin') return
+  const provider = dirname(requireRuntime.resolve('@deepseek-ai/dsh-experimental-cua-macos/package.json'))
+  const physical = provider.replace(/(^|[/\\])([^/\\]+\.asar)(?=[/\\]|$)/u, '$1$2.unpacked')
+  const helper = realpathSync(join(physical, 'native', 'bin', `darwin-${process.arch}`, 'dsh-cua-native'))
+  const result = spawnSync(helper, ['--ensure-shared'], { encoding: 'utf8', timeout: 45_000 })
+  assert.equal(result.error, undefined)
+  assert.equal(result.signal, null, 'Computer Use helper exited without a signal')
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /dsh-cua-native: Shared helper requires SHA-256 runtime key/u)
+}
+
+/** Decode generated PCM through the speech provider's native binding without models or microphone access. */
+function checkSpeech() {
+  const provider = requireRuntime.resolve('@deepseek-ai/dsh-experimental-speech-to-text-sensevoice/package.json')
+  const sherpa = createRequire(provider)('sherpa-onnx-node')
+  assert.equal(typeof sherpa.OfflineRecognizer, 'function')
+  assert.equal(typeof sherpa.Vad, 'function')
+  const wave = Buffer.alloc(48)
+  wave.write('RIFF', 0)
+  wave.writeUInt32LE(40, 4)
+  wave.write('WAVEfmt ', 8)
+  wave.writeUInt32LE(16, 16)
+  wave.writeUInt16LE(1, 20)
+  wave.writeUInt16LE(1, 22)
+  wave.writeUInt32LE(16000, 24)
+  wave.writeUInt32LE(32000, 28)
+  wave.writeUInt16LE(2, 32)
+  wave.writeUInt16LE(16, 34)
+  wave.write('data', 36)
+  wave.writeUInt32LE(4, 40)
+  wave.writeInt16LE(1024, 44)
+  wave.writeInt16LE(-2048, 46)
+  const file = join(scratch, 'speech.wav')
+  writeFileSync(file, wave, { flag: 'wx' })
+  const audio = sherpa.readWave(file, false)
+  assert.equal(audio.sampleRate, 16000)
+  assert.deepEqual(Array.from(audio.samples), [1024 / 32768, -2048 / 32768])
 }
 
 /** Encode and decode a pixel through the packaged libvips binary. */
@@ -147,6 +205,12 @@ try {
   await checkPty()
   console.error('runtime payload: search')
   await checkSearch()
+  console.error('runtime payload: flock')
+  await checkFlock()
+  console.error('runtime payload: cua')
+  checkCua()
+  console.error('runtime payload: speech')
+  checkSpeech()
   console.error('runtime payload: checks complete; awaiting process exit')
 } finally {
   // This private tree contains only fixture files; Windows may release handles after terminal exit.
@@ -156,5 +220,6 @@ try {
 // Natural event-loop drain includes node-pty's worker and console-list helper teardown.
 process.once('beforeExit', () => {
   console.log(JSON.stringify({ node: process.versions.node, platform: process.platform, arch: process.arch,
-    koffi: true, sharp: true, html: true, pty: true, pnpm: true, grep: true, glob: true }))
+    koffi: true, sharp: true, html: true, pty: true, pnpm: true, grep: true, glob: true,
+    flock: process.platform !== 'win32', cua: process.platform === 'darwin', speech: true }))
 })

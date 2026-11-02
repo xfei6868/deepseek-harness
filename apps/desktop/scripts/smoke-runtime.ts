@@ -92,6 +92,10 @@ export function apply(ctx) {
   if (!(ctx instanceof Context)) throw new Error('desktop runtime: external plugin loaded another Cordis instance')
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/desktop-smoke',
     handler(_request, response) { response.end('plugin route ready') } }))
+  if (${JSON.stringify(runtime.platform === 'darwin')}) {
+    ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/desktop-smoke-cua',
+      handler(_request, response) { response.end(ctx.get('computerUse')?.providerName ?? '') } }))
+  }
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/desktop-smoke-install',
     async handler(_request, response) {
       try {
@@ -142,6 +146,7 @@ export function apply(ctx) {
       dsh: { profile: { bundles: string[] } }
     }
     manifest.dependencies = { ...manifest.dependencies, [pluginName]: `file:${plugin}` }
+    if (runtime.platform === 'darwin') manifest.dsh.profile.bundles.push('@deepseek-ai/dsh-cua-bundle')
     manifest.dsh.profile.bundles.push(pluginName)
     writeFileSync(join(profile, 'package.json'), JSON.stringify(manifest))
     writeFileSync(join(profile, 'cordis.patch.yml'), '- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n')
@@ -157,6 +162,11 @@ export function apply(ctx) {
     }
     const pluginResponse = await fetch(new URL('/desktop-smoke', ready.url), { headers: { cookie } })
     if (await pluginResponse.text() !== 'plugin route ready') throw new Error('desktop runtime: plugin HTTP route failed')
+    if (runtime.platform === 'darwin') {
+      const cua = await fetch(new URL('/desktop-smoke-cua', ready.url), { headers: { cookie } })
+      if (!cua.ok || await cua.text() !== 'dsh-cua') throw new Error('desktop runtime: Computer Use provider did not activate')
+      console.log('desktop runtime: Computer Use provider activation passed')
+    }
     const installation = await fetch(new URL('/desktop-smoke-install', ready.url), {
       headers: { cookie }, signal: AbortSignal.timeout(120_000),
     })

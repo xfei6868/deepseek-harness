@@ -232,6 +232,7 @@ it.each(['mac-arm64', 'mac-x64', 'win-x64'] as const)('selects branding from the
 
 it.each([
   ['mac-arm64', 'run build --profile local'],
+  ['mac-x64', 'exec tsx apps/desktop/scripts/prepare-cua-native.ts'],
   ['win-x64', 'run build --profile local'],
   ['mac-arm64', 'exec tsx apps/desktop/scripts/pack-local-packages.ts'],
   ['win-x64', 'exec tsx apps/desktop/scripts/pack-local-packages.ts'],
@@ -246,6 +247,18 @@ it.each([
     target === 'win-x64' && failure.startsWith('exec tsx') ? ['run prepare:runtime'] : [])
   expect(stages.some(stage => stage.startsWith('--dir apps/desktop-host pack'))).toBe(false)
   expect(writeFileSync).not.toHaveBeenCalled()
+})
+
+it.each(['mac-arm64', 'mac-x64'] as const)('prepares the %s Computer Use helper before packing its provider', async (target) => {
+  const { run, stages } = supervisor()
+  const invocation = parseDesktopPackageInvocation([target, '--unsigned'], 'darwin', 'arm64')
+  await packageTarget(invocation, environment, run)
+  const prepare = stages.indexOf('exec tsx apps/desktop/scripts/prepare-cua-native.ts')
+  expect(prepare).toBeGreaterThanOrEqual(0)
+  expect(prepare).toBeLessThan(stages.findIndex(stage => stage.startsWith('exec tsx apps/desktop/scripts/pack-local-packages.ts')))
+  const call = run.run.mock.calls.find(([stage]) => stage === 'exec tsx apps/desktop/scripts/prepare-cua-native.ts')!
+  expect(call[3].env).toMatchObject({ DSH_DESKTOP_TARGET_PLATFORM: 'darwin',
+    DSH_DESKTOP_TARGET_ARCH: target === 'mac-x64' ? 'x64' : 'arm64' })
 })
 
 it('checks the assembled macOS runtime before notarizing and recording the release', async () => {
