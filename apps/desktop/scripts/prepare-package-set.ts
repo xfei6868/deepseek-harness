@@ -157,7 +157,11 @@ export function prepareDesktopPackageSet(
   assertDesktopHostPackageFiles(tarballFiles(host.tarball))
   const cua = selected.find(packed => packed.manifest.name === '@deepseek-ai/dsh-experimental-cua-macos')
   if (target.platform === 'darwin' && cua !== undefined) {
-    const helper = `package/native/bin/darwin-${target.arch}/dsh-cua-native`
+    const directory = `package/native/bin/darwin-${target.arch}`
+    if (!tarballFiles(cua.tarball).includes(`${directory}/current.json`)) throw new Error(`desktop package set: Computer Use tarball omits ${directory}/current.json; prepare the target native application before packing`)
+    const receipt = JSON.parse(capture('tar', ['-xOzf', cua.tarball, `${directory}/current.json`])) as { bundle?: unknown }
+    if (typeof receipt.bundle !== 'string' || !/^[a-f0-9]{64}$/u.test(receipt.bundle)) throw new Error('desktop package set: invalid Computer Use application receipt')
+    const helper = `${directory}/${receipt.bundle}/DSH Computer Use.app/Contents/MacOS/dsh-cua-native`
     if (!tarballFiles(cua.tarball).includes(helper)) {
       throw new Error(`desktop package set: Computer Use tarball omits ${helper}; prepare the target native helper before packing`)
     }

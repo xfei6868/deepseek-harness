@@ -1,37 +1,34 @@
-/** Build the target macOS Computer Use helper before its package enters Desktop resources. */
+/** Prepare the target Computer Use application before packing Desktop resources. */
 import { execFileSync } from 'node:child_process'
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { desktopTargetPlatform, resolveDesktopBuildTarget, resolveDesktopTargetBuildPaths } from './desktop-build-paths.mjs'
+import { resolveMacOSSigningEnvironment } from './desktop-release-environment.mjs'
 
 /**
- * Compile and atomically publish a helper only after lipo verifies the requested architecture.
- * A compiler or architecture failure leaves the previous helper unchanged and rejects preparation.
+ * Build and sign the provider-owned application, then verify its target architecture.
+ * The provider publishes its immutable generation and receipt atomically.
  * @param packageRoot - Source directory of the macOS Computer Use provider.
  * @param scratch - Target-owned Swift build directory.
- * @param arch - Architecture of the Desktop runtime that will execute the helper.
+ * @param arch - Architecture of the Desktop runtime.
+ * @param identity - Signing identity; a hyphen selects a local ad-hoc build.
  */
-export function prepareDesktopCuaNative(packageRoot: string, scratch: string, arch: 'arm64' | 'x64'): void {
+export function prepareDesktopCuaNative(packageRoot: string, scratch: string, arch: 'arm64' | 'x64', identity = '-'): void {
   const cpu = arch === 'x64' ? 'x86_64' : 'arm64'
-  execFileSync('/usr/bin/xcrun', ['swift', 'build', '--package-path', join(packageRoot, 'native'),
-    '--scratch-path', scratch, '--configuration', 'release', '--product', 'dsh-cua-native', '--arch', cpu],
+  const destination = join(packageRoot, 'native', 'bin', `darwin-${arch}`)
+  execFileSync('/usr/bin/xcrun', ['python3', join(packageRoot, 'native', 'build_app.py'),
+    '--scratch-path', scratch, '--output-directory', destination, '--arch', cpu, '--identity', identity],
   { stdio: 'inherit', timeout: 600_000 })
-  const source = join(scratch, 'release', 'dsh-cua-native')
-  execFileSync('/usr/bin/lipo', [source, '-verify_arch', cpu], { stdio: 'inherit', timeout: 30_000 })
-  const destination = join(packageRoot, 'native', 'bin', `darwin-${arch}`, 'dsh-cua-native')
-  mkdirSync(dirname(destination), { recursive: true })
-  const temporary = mkdtempSync(join(dirname(destination), '.prepared-'))
-  try {
-    const pending = join(temporary, 'dsh-cua-native')
-    copyFileSync(source, pending)
-    chmodSync(pending, 0o755)
-    renameSync(pending, destination)
-  } finally { rmSync(temporary, { recursive: true, force: true }) }
+  const receipt = JSON.parse(readFileSync(join(destination, 'current.json'), 'utf8')) as { bundle?: unknown }
+  if (typeof receipt.bundle !== 'string' || !/^[a-f0-9]{64}$/u.test(receipt.bundle)) throw new Error('Computer Use application receipt is invalid')
+  const executable = join(destination, receipt.bundle, 'DSH Computer Use.app', 'Contents', 'MacOS', 'dsh-cua-native')
+  execFileSync('/usr/bin/lipo', [executable, '-verify_arch', cpu], { stdio: 'inherit', timeout: 30_000 })
 }
 
 if (import.meta.main) {
   const target = desktopTargetPlatform(resolveDesktopBuildTarget())
   if (target.platform !== 'darwin') throw new Error('Computer Use helper preparation requires a macOS target')
+  const identity = process.env.DSH_DESKTOP_UNSIGNED === '1' ? '-' : resolveMacOSSigningEnvironment(process.env).signingIdentity
   prepareDesktopCuaNative(resolve(import.meta.dirname, '../../../packages/experimental/cua-macos'),
-    join(resolveDesktopTargetBuildPaths().root, 'cua-native'), target.arch)
+    join(resolveDesktopTargetBuildPaths().root, 'cua-native'), target.arch, identity)
 }

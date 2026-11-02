@@ -21,9 +21,8 @@ function fixture() {
   return { run, jobs, routes, calls, api }
 }
 
-it.each(['mac-arm64', 'mac-x64'])('pins the latest successful %s attempt and finds the package job across pages', (target) => {
+it('pins the latest successful attempt and finds the package job across pages', () => {
   const f = fixture()
-  f.routes.mini.target = target
   expect(selectDesktopPackage('owner/repo', { package_run_id: '42' }, f.routes, f.api))
     .toMatchObject({ run: { run_attempt: 2 }, runnerName: 'mini', runnerLabel: 'dsh-mini' })
   expect(f.calls).toContain('repos/owner/repo/actions/runs/42/attempts/2')
@@ -69,17 +68,16 @@ it.each(['0', '../42', '1\nrunner=x', 'abc'])('rejects malformed package ID %s b
   expect(f.calls).toEqual([])
 })
 
-it.each(['mac-arm64', 'mac-x64'] as const)('resolves a retained %s package with publishRequested=false without a GitHub artifact', async (target) => {
+it('resolves an old locally retained package with publishRequested=false without a GitHub artifact', async () => {
   const root = await mkdtemp(join(tmpdir(), 'desktop-selection-'))
   try {
     const f = fixture()
-    f.routes.mini.target = target
     const selection = selectDesktopPackage('owner/repo', { package_run_id: '42' }, f.routes, f.api)
     const file = join(root, 'installer.dmg')
     await writeFile(file, 'fixture')
     const source = { repository: 'owner/repo', runId: '42', attempt: '2', commit: 'a'.repeat(40),
       workflowCommit: 'a'.repeat(40), sourceRef: 'master', channel: 'nightly' as const, runnerName: 'mini',
-      target, preset: 'test' as const, productVersion: '1.0.0', version: '1.0.0',
+      target: 'mac-arm64' as const, preset: 'test' as const, productVersion: '1.0.0', version: '1.0.0',
       testReleaseId: 'b'.repeat(32), publishRequested: false, qualification: 'notarized' as const }
     await retainDesktopRelease(join(root, 'releases'), source, [file])
     const env = { GITHUB_REPOSITORY: 'owner/repo', RUNNER_NAME: 'mini', DSH_PACKAGING_CONFIG_DIR: join(root, 'packaging'),
@@ -91,7 +89,7 @@ it.each(['mac-arm64', 'mac-x64'] as const)('resolves a retained %s package with 
       if (path.includes('/environments/')) return { protection_rules: [{ type: 'required_reviewers', reviewers: [{}] }] }
       return { sha: source.commit }
     }
-    expect(await resolveRetainedDesktopPublication(env, api)).toMatchObject({ runId: '42', attempt: '2', preset: 'test', target })
+    expect(await resolveRetainedDesktopPublication(env, api)).toMatchObject({ runId: '42', attempt: '2', preset: 'test' })
     expect(apiCalls.some(path => path.includes('/artifacts'))).toBe(false)
     await expect(resolveRetainedDesktopPublication({ ...env, RUNNER_NAME: 'other' }, api)).rejects.toThrow(/different machine/u)
     await expect(resolveRetainedDesktopPublication(env, path => path.includes('/environments/') ? { protection_rules: [] } : api(path)))
@@ -122,4 +120,18 @@ it.each(['mac-arm64', 'mac-x64'] as const)('resolves a retained %s package with 
     await rm(join(root, 'releases/42/2'), { recursive: true })
     await expect(resolveRetainedDesktopPublication(env, api)).rejects.toThrow()
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+it('routes both Mac architectures to one machine without authorizing an unlisted target', () => {
+  const f = fixture()
+  const routes = { mini: { label: 'dsh-mini', target: ['mac-arm64', 'mac-x64'] } }
+  for (const path of ['macos-package.yml', 'macos-intel-package.yml']) {
+    f.run.path = `.github/workflows/${path}`
+    expect(selectDesktopPackage('owner/repo', { package_run_id: '42' }, routes, f.api))
+      .toMatchObject({ runnerName: 'mini', runnerLabel: 'dsh-mini' })
+  }
+  expect(() => selectDesktopPackage('owner/repo', { package_run_id: '42' }, f.routes, f.api)).toThrow(/no configured/u)
+  for (const target of [[], ['mac-x64', 'linux-x64']]) {
+    expect(() => selectDesktopPackage('owner/repo', { package_run_id: '42' }, { mini: { label: 'dsh-mini', target } }, f.api)).toThrow()
+  }
 })

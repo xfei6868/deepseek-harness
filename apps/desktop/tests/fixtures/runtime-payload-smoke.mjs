@@ -128,7 +128,10 @@ function checkCua() {
   if (process.platform !== 'darwin') return
   const provider = dirname(requireRuntime.resolve('@deepseek-ai/dsh-experimental-cua-macos/package.json'))
   const physical = provider.replace(/(^|[/\\])([^/\\]+\.asar)(?=[/\\]|$)/u, '$1$2.unpacked')
-  const helper = realpathSync(join(physical, 'native', 'bin', `darwin-${process.arch}`, 'dsh-cua-native'))
+  const directory = join(physical, 'native', 'bin', `darwin-${process.arch}`)
+  const receipt = JSON.parse(readFileSync(join(directory, 'current.json'), 'utf8'))
+  assert.match(receipt.bundle, /^[a-f0-9]{64}$/u)
+  const helper = realpathSync(join(directory, receipt.bundle, 'DSH Computer Use.app', 'Contents', 'MacOS', 'dsh-cua-native'))
   const result = spawnSync(helper, ['--ensure-shared'], { encoding: 'utf8', timeout: 45_000 })
   assert.equal(result.error, undefined)
   assert.equal(result.signal, null, 'Computer Use helper exited without a signal')

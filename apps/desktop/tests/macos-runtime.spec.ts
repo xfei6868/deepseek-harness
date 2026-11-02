@@ -102,3 +102,16 @@ it.each(['arm64', 'x64'] as const)('selects %s Node entitlements and keeps helpe
   }
   expect(signMacOSRuntimeCode).toHaveBeenCalledWith(addon, expect.any(String), identity, undefined)
 })
+
+it('preserves and verifies the provider-signed Computer Use application', async () => {
+  const path = root()
+  const executable = join(path, 'node_modules/@deepseek-ai/dsh-experimental-cua-macos/native/bin/darwin-x64',
+    'a'.repeat(64), 'DSH Computer Use.app/Contents/MacOS/dsh-cua-native')
+  mkdirSync(join(executable, '..'), { recursive: true })
+  writeFileSync(executable, Buffer.from('cffaedfe00000000', 'hex'))
+  await expect(signMacOSRuntime(path, 'com.example.app', identity, 'x64')).resolves.toBe(1)
+  expect(signMacOSRuntimeCode).not.toHaveBeenCalled()
+  expect(verifyMacOSRuntimeCode).toHaveBeenCalledExactlyOnceWith(executable, identity)
+  vi.mocked(verifyMacOSRuntimeCode).mockImplementation(() => { throw new Error('invalid helper signature') })
+  await expect(signMacOSRuntime(path, 'com.example.app', identity, 'x64')).rejects.toThrow('native signing failed')
+})

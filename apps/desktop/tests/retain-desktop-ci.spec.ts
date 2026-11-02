@@ -10,8 +10,7 @@ const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
 it.each([
-  ['mac-arm64', 'notarized'], ['mac-x64', 'notarized'], ['win-x64', 'signed'],
-  ['mac-arm64', 'unnotarized'], ['mac-x64', 'unnotarized'], ['win-x64', 'unsigned'],
+  ['mac-arm64', 'notarized'], ['mac-x64', 'notarized'], ['mac-x64', 'unnotarized'], ['win-x64', 'signed'], ['mac-arm64', 'unnotarized'], ['win-x64', 'unsigned'],
 ] as const)('retains the complete %s %s release without signing or upload credentials', async (target, qualification) => {
   const root = await mkdtemp(join(tmpdir(), 'retain-ci-'))
   roots.push(root)

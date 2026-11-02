@@ -12,18 +12,10 @@ function fixture() {
   return { run, source, jobs, routes }
 }
 
-it.each(['mac-arm64', 'mac-x64'])('routes the exact successful %s attempt to its registered machine', (target) => {
+it('routes the exact successful attempt to its registered machine', () => {
   const f = fixture()
-  f.source.target = target
-  f.routes.mini.target = target
   expect(resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes))
-    .toMatchObject({ runId: '42', attempt: '2', runnerLabel: 'dsh-mini', preset: 'test', target })
-})
-
-it('rejects a retained Intel package routed as Apple Silicon', () => {
-  const f = fixture()
-  f.source.target = 'mac-x64'
-  expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes)).toThrow(/no configured/u)
+    .toMatchObject({ runId: '42', attempt: '2', runnerLabel: 'dsh-mini', preset: 'test' })
 })
 
 it.each(['test', 'production'])('explains how to rebuild debugging packages for %s', (preset) => {
@@ -82,4 +74,17 @@ it('allows repository branch packages for test but rejects them for production',
     .toMatchObject({ sourceRef: f.source.sourceRef, preset: 'test' })
   f.source.preset = 'production'
   expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes)).toThrow(/Production source/u)
+})
+
+it('matches Intel artifacts to the Intel workflow on a machine serving both architectures', () => {
+  const f = fixture()
+  f.source.target = 'mac-x64'
+  const routes = { mini: { label: 'dsh-mini', target: ['mac-arm64', 'mac-x64'] } }
+  expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, routes)).toThrow(/does not match/u)
+  f.run.path = '.github/workflows/macos-intel-package.yml'
+  expect(resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, routes))
+    .toMatchObject({ target: 'mac-x64', runnerLabel: 'dsh-mini' })
+  expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, f.routes)).toThrow(/no configured/u)
+  f.source.target = 'mac-arm64'
+  expect(() => resolveDesktopPublishRoute('owner/repo', f.run, { source: f.source }, f.jobs, routes)).toThrow(/does not match/u)
 })

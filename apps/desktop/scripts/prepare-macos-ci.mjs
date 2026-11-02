@@ -2,13 +2,13 @@
 import { appendFileSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { desktopCiVersion } from './desktop-ci-version.mjs'
 import { desktopTargetPlatform, resolveDesktopBuildTarget } from './desktop-build-paths.mjs'
+import { desktopCiVersion } from './desktop-ci-version.mjs'
 import { loadDesktopPackageEnvironment, validateDesktopPackageEnvironment } from './desktop-package-environment.mjs'
 
+const target = desktopTargetPlatform(resolveDesktopBuildTarget(process.env))
+if (target.platform !== 'darwin') throw new Error('macOS CI requires a macOS target')
 const appRoot = resolve(import.meta.dirname, '..')
-const target = desktopTargetPlatform(resolveDesktopBuildTarget())
-if (target.platform !== 'darwin') throw new Error('macOS packaging requires a macOS target')
 const product = JSON.parse(readFileSync(resolve(appRoot, 'package.json'), 'utf8'))
 const version = desktopCiVersion(process.env, product.version)
 if (!process.env.DSH_PACKAGING_PRESET) throw new Error('Select a machine preset')

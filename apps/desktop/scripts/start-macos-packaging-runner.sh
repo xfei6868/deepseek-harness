@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run an already registered Mac runner with explicit tools and machine configuration.
+# Run an already registered Apple Silicon runner with explicit tools and machine configuration.
 set -euo pipefail
 if [[ $# -lt 3 || $# -gt 4 || (${4:-} != '' && ${4:-} != '--check' && ${4:-} != '--service') ]]; then
   echo 'Usage: bash start-macos-packaging-runner.sh RUNNER_ROOT CONFIG_ROOT NODE_BIN [--check|--service]' >&2
@@ -11,7 +11,7 @@ node_bin=$3
 for directory in "$runner_root" "$config_root" "$node_bin"; do
   [[ "$directory" = /* && -d "$directory" ]] || { echo 'All directories must exist and be absolute' >&2; exit 1; }
 done
-[[ $(uname -s) = Darwin && ($(uname -m) = arm64 || $(uname -m) = x86_64) ]] || { echo 'Requires an Intel or Apple Silicon Mac' >&2; exit 1; }
+[[ $(uname -s) = Darwin && $(uname -m) = arm64 ]] || { echo 'Requires an Apple Silicon Mac' >&2; exit 1; }
 [[ -x "$node_bin/node" ]] || { echo 'NODE_BIN must contain Node 24' >&2; exit 1; }
 [[ $("$node_bin/node" -p 'process.versions.node.split(".")[0]') = 24 ]] || { echo 'Requires Node 24' >&2; exit 1; }
 [[ -f "$config_root/presets/test.env" && -f "$config_root/secrets/macos-signing.env" ]] || { echo 'Configure the test preset and macos-signing.env before starting' >&2; exit 1; }

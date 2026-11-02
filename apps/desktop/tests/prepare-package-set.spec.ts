@@ -181,8 +181,9 @@ it('requires the matching Computer Use executable for each macOS package set and
     mkdirSync(folder, { recursive: true })
     writeFileSync(join(folder, 'package.json'), JSON.stringify(entry.manifest))
     if (name === '@deepseek-ai/dsh-experimental-cua-macos') {
-      mkdirSync(join(folder, 'native/bin/darwin-arm64'), { recursive: true })
-      writeFileSync(join(folder, 'native/bin/darwin-arm64/dsh-cua-native'), 'arm64 helper')
+      mkdirSync(join(folder, 'native/bin/darwin-arm64', 'a'.repeat(64), 'DSH Computer Use.app/Contents/MacOS'), { recursive: true })
+      writeFileSync(join(folder, 'native/bin/darwin-arm64/current.json'), JSON.stringify({ bundle: 'a'.repeat(64) }))
+      writeFileSync(join(folder, 'native/bin/darwin-arm64', 'a'.repeat(64), 'DSH Computer Use.app/Contents/MacOS/dsh-cua-native'), 'arm64 helper')
     }
     if (name === '@deepseek-ai/dsh-desktop-host') {
       for (const file of DESKTOP_HOST_RUNTIME_FILES) {
@@ -199,10 +200,11 @@ it('requires the matching Computer Use executable for each macOS package set and
   expect(readFileSync(join(output, DESKTOP_PACKAGES_DIR, 'dsh-experimental-cua-macos.tgz')))
     .toEqual(readFileSync(join(inputs, 'dsh-experimental-cua-macos.tgz')))
   expect(() => { prepareDesktopPackageSet([inputs], output, { platform: 'darwin', arch: 'x64' }) })
-    .toThrow('Computer Use tarball omits package/native/bin/darwin-x64/dsh-cua-native')
+    .toThrow('Computer Use tarball omits package/native/bin/darwin-x64/current.json')
   const provider = join(root, 'dsh-experimental-cua-macos', 'package')
-  mkdirSync(join(provider, 'native/bin/darwin-x64'), { recursive: true })
-  writeFileSync(join(provider, 'native/bin/darwin-x64/dsh-cua-native'), 'x64 helper')
+  mkdirSync(join(provider, 'native/bin/darwin-x64', 'b'.repeat(64), 'DSH Computer Use.app/Contents/MacOS'), { recursive: true })
+  writeFileSync(join(provider, 'native/bin/darwin-x64/current.json'), JSON.stringify({ bundle: 'b'.repeat(64) }))
+  writeFileSync(join(provider, 'native/bin/darwin-x64', 'b'.repeat(64), 'DSH Computer Use.app/Contents/MacOS/dsh-cua-native'), 'x64 helper')
   execFileSync('tar', ['-czf', join(inputs, 'dsh-experimental-cua-macos.tgz'), '-C', join(provider, '..'), 'package'])
   prepareDesktopPackageSet([inputs], output, { platform: 'darwin', arch: 'x64' })
   expect(readFileSync(join(output, DESKTOP_PACKAGES_DIR, 'dsh-experimental-cua-macos.tgz')))

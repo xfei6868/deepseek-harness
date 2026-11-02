@@ -92,6 +92,8 @@ it.each(['arm64', 'x64'])('records %s debugging artifact paths only for an expli
     expect(invalidSelection.status).toBe(1)
     expect(invalidSelection.stderr).toContain('Invalid skip notarization selection')
     const debugging = run('true')
+    expect(debugging.error).toBeUndefined()
+    expect(debugging.signal).toBeNull()
     expect(debugging.stderr).toBe('')
     expect(debugging.status).toBe(0)
     expect(await readFile(output, 'utf8')).toContain('artifacts=unnotarized-artifacts\nmode=unnotarized-debug\n')

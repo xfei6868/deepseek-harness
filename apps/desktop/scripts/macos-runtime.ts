@@ -33,14 +33,15 @@ async function primaryRuntimeFiles(root: string): Promise<string[]> {
 }
 
 /**
- * Sign and verify every materialized Mach-O file, awaiting all signers on failure.
+ * Sign materialized Mach-O files and preserve provider-signed Computer Use applications.
+ * Await every signer before reporting a failure.
  * @param root - Self-contained production runtime.
  * @param appId - Release application identifier.
  * @param expected - Required signing identity.
  * @param arch - Target runtime architecture, independent of the signing host.
  * @param cacheDirectory - Optional content-addressed cache; requires the keychain-owned signing probe.
  * @param kind - Primary payloads admit validated Python aliases; Desktop application runtimes reject every link.
- * @returns Number of signed native files.
+ * @returns Number of verified native files.
  */
 export async function signMacOSRuntime(
   root: string, appId: string, expected: MacOSSigningEnvironment, arch: 'arm64' | 'x64', cacheDirectory?: string,
@@ -52,10 +53,17 @@ export async function signMacOSRuntime(
   let hits = 0
   let misses = 0
   let next = 0
+  const cuaDirectory = 'node_modules/@deepseek-ai/dsh-experimental-cua-macos/native/bin/'
+  const cuaExecutable = /^darwin-(?:arm64|x64)\/[a-f0-9]{64}\/DSH Computer Use\.app\/Contents\/MacOS\/dsh-cua-native$/u
   const workers = Array.from({ length: Math.min(4, files.length) }, async () => {
     for (;;) {
       const path = files[next++]
       if (path === undefined) return
+      // The provider receipt identifies the signed bundle bytes; re-signing its executable invalidates that bundle.
+      if (path.startsWith(cuaDirectory) && cuaExecutable.test(path.slice(cuaDirectory.length))) {
+        verifyMacOSRuntimeCode(join(root, path), expected)
+        continue
+      }
       const identifier = `${appId}.runtime.${createHash('sha256').update(path).digest('hex')}`
       const isNode = path === 'dependencies/node/bin/node'
       const needsJit = isNode
